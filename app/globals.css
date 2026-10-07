@@ -10,9 +10,9 @@ button, input { font: inherit; }
 button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--gold-bright); outline-offset: 3px; }
 .app-shell { max-width: 1260px; margin: auto; padding: 0 52px 34px; }
 .topbar { height: 82px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
-.wordmark { display: flex; align-items: center; gap: 11px; text-decoration: none; color: var(--ink); font-size: 15px; font-weight: 750; letter-spacing: .19em; }
+.wordmark { display: flex; align-items: center; gap: 11px; text-decoration: none; color: var(--ink); font-size: clamp(19px, 2.2vw, 25px); font-weight: 750; letter-spacing: .13em; }
 .mark { width: 31px; height: 31px; border: 1px solid var(--gold); display: grid; place-items: center; color: var(--gold-bright); font-family: Georgia, serif; font-size: 17px; font-weight: 400; letter-spacing: 0; }
-.wordmark-light { color: var(--gold-bright); font-weight: 400; }
+.wordmark-light { color: var(--gold-bright); font-weight: 500; }
 .top-meta { display: flex; align-items: center; gap: 10px; color: #a5a197; font-size: 9px; letter-spacing: .16em; }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 10px #c3a66b77; }
 .top-divider { color: #57544c; }
@@ -82,5 +82,5 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
 .footer { border-top: 1px solid var(--line); padding-top: 16px; display: flex; justify-content: space-between; color: var(--gold); font-size: 8px; letter-spacing: .13em; }
 .footer-muted { color: #716d63; }
 .footer > span:last-child { color: #777368; }
-@media (max-width: 760px) { .app-shell { padding: 0 18px 25px; } .topbar { height: 68px; } .top-meta { font-size: 7px; letter-spacing: .1em; gap: 7px; } .hero { padding: 57px 0 40px; } .hero h1 { font-size: clamp(50px, 12vw, 72px); } .hero-aside { display: none; } .workflow { gap: 8px; overflow: hidden; } .workflow-step { font-size: 7px; gap: 5px; } .step-rule { width: 15px; flex: 0 0 15px; } .main-grid { grid-template-columns: 1fr; } .panel { padding: 21px; } .replacement-section { margin-top: 40px; } .notes-grid { grid-template-columns: 1fr; } .note-card { min-height: 0; } .footer { gap: 12px; font-size: 7px; } }
+@media (max-width: 760px) { .app-shell { padding: 0 18px 25px; } .topbar { height: 68px; } .wordmark { font-size: 21px; letter-spacing: .1em; gap: 9px; } .top-meta { font-size: 7px; letter-spacing: .1em; gap: 7px; } .hero { padding: 57px 0 40px; } .hero h1 { font-size: clamp(50px, 12vw, 72px); } .hero-aside { display: none; } .workflow { gap: 8px; overflow: hidden; } .workflow-step { font-size: 7px; gap: 5px; } .step-rule { width: 15px; flex: 0 0 15px; } .main-grid { grid-template-columns: 1fr; } .panel { padding: 21px; } .replacement-section { margin-top: 40px; } .notes-grid { grid-template-columns: 1fr; } .note-card { min-height: 0; } .footer { gap: 12px; font-size: 7px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }
