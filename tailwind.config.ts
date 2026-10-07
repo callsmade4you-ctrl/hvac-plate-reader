@@ -1,0 +1,1 @@
+import type { Config } from 'tailwindcss';\nexport default {content:['./app/**/*.{js,ts,jsx,tsx,mdx}'],theme:{extend:{}},plugins:[]} satisfies Config;\n
