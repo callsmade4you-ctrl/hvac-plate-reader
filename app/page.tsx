@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type Equipment = { manufacturer: string; model: string; serial: string; date: string; capacity: string; electrical: string; refrigerant: string };
 const EMPTY_EQUIPMENT: Equipment = { manufacturer: '', model: '', serial: '', date: '', capacity: '', electrical: '', refrigerant: '' };
@@ -10,40 +10,29 @@ const FIELDS: { key: keyof Equipment; label: string; hint: string }[] = [
 const REPLACEMENT_NOTES = [
   { title: 'Capacity first', text: 'Confirm the existing load and match nominal capacity to a Manual J calculation—not tonnage alone.' }, { title: 'Verify the system', text: 'Check indoor and outdoor unit pairing, AHRI certification, electrical requirements, and refrigerant line compatibility.' }, { title: 'Local requirements', text: 'Review current efficiency incentives, local code, and manufacturer documentation before quoting.' },
 ];
-const OCR_TIMEOUT_MS = 20_000;
+const OCR_TIMEOUT_MS = 28_000;
 const OCR_MAX_DIMENSION = 1600;
 
 function extractSpecs(text: string): Equipment {
   const source = text.toUpperCase(); const capture = (pattern: RegExp) => source.match(pattern)?.[1]?.trim() ?? '';
   const manufacturers = ['SLANT/FIN', 'CARRIER', 'LENNOX', 'TRANE', 'GOODMAN', 'RHEEM', 'YORK', 'DAIKIN', 'AMANA', 'MITSUBISHI', 'BRYANT', 'PAYNE', 'RINNAI', 'NAVIEN', 'BOSCH'];
-  return { manufacturer: capture(/(?:MANUFACTURER|BRAND)[:\s]+([A-Z][A-Z0-9 &/-]{1,30})/) || manufacturers.find((brand) => source.includes(brand)) || '', model: capture(/MODEL(?:\s*(?:NO\.?|NUMBER))?[#:\s]+([A-Z0-9./-]{3,30})/), serial: capture(/SERIAL(?:\s*(?:NO\.?|NUMBER))?[#:\s]+([A-Z0-9./-]{4,30})/), date: capture(/(?:MFG|MANUFACTURED|DATE)[:\s]+([A-Z0-9/-]{4,20})/), capacity: capture(/(\d{1,2}(?:\.\d)?\s*(?:TONS?|BTU|KBTU|MBH))/), electrical: capture(/(\d{2,3}\s*V(?:OLTS)?[^\n]{0,40})/), refrigerant: capture(/(R-?\d{2,3}[A-Z]?)/) };
+  return { manufacturer: capture(/(?:MANUFACTURER|BRAND)[:\\s]+([A-Z][A-Z0-9 &/-]{1,30})/) || manufacturers.find((brand) => source.includes(brand)) || '', model: capture(/MODEL(?:\\s*(?:NO\\.?|NUMBER))?[#:\\s]+([A-Z0-9./-]{3,30})/), serial: capture(/SERIAL(?:\\s*(?:NO\\.?|NUMBER))?[#:\\s]+([A-Z0-9./-]{4,30})/), date: capture(/(?:MFG|MANUFACTURED|DATE)[:\\s]+([A-Z0-9/-]{4,20})/), capacity: capture(/(\\d{1,2}(?:\\.\\d)?\\s*(?:TONS?|BTU|KBTU|MBH))/), electrical: capture(/(\\d{2,3}\\s*V(?:OLTS)?[^\\n]{0,40})/), refrigerant: capture(/(R-?\\d{2,3}[A-Z]?)/) };
 }
 
 function prepareOcrImage(file: File): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    const sourceUrl = URL.createObjectURL(file);
-    const image = new Image();
+    const sourceUrl = URL.createObjectURL(file); const image = new Image();
     image.onload = () => {
       try {
         const scale = Math.min(1, OCR_MAX_DIMENSION / Math.max(image.naturalWidth, image.naturalHeight));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-        const context = canvas.getContext('2d', { willReadFrequently: true });
-        if (!context) throw new Error('Canvas is unavailable');
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-        for (let i = 0; i < pixels.data.length; i += 4) {
-          const gray = Math.min(255, Math.max(0, ((pixels.data[i] * 0.299 + pixels.data[i + 1] * 0.587 + pixels.data[i + 2] * 0.114) - 128) * 1.15 + 128));
-          pixels.data[i] = gray; pixels.data[i + 1] = gray; pixels.data[i + 2] = gray;
-        }
-        context.putImageData(pixels, 0, 0);
-        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Could not prepare image for scanning')), 'image/jpeg', 0.88);
-      } catch (error) { reject(error); }
-      finally { URL.revokeObjectURL(sourceUrl); }
+        const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext('2d', { willReadFrequently: true }); if (!context) throw new Error('Canvas is unavailable');
+        context.drawImage(image, 0, 0, canvas.width, canvas.height); const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        for (let i = 0; i < pixels.data.length; i += 4) { const gray = Math.min(255, Math.max(0, ((pixels.data[i] * 0.299 + pixels.data[i + 1] * 0.587 + pixels.data[i + 2] * 0.114) - 128) * 1.15 + 128)); pixels.data[i] = gray; pixels.data[i + 1] = gray; pixels.data[i + 2] = gray; }
+        context.putImageData(pixels, 0, 0); canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Could not prepare image for scanning')), 'image/jpeg', 0.88);
+      } catch (error) { reject(error); } finally { URL.revokeObjectURL(sourceUrl); }
     };
-    image.onerror = () => { URL.revokeObjectURL(sourceUrl); reject(new Error('This photo format could not be opened. Try a JPG or PNG photo.')); };
-    image.src = sourceUrl;
+    image.onerror = () => { URL.revokeObjectURL(sourceUrl); reject(new Error('This photo format could not be opened. Try a JPG or PNG photo.')); }; image.src = sourceUrl;
   });
 }
 
@@ -57,83 +46,49 @@ export default function Home() {
     if (!file.type.startsWith('image/')) { setError('Choose an image file to scan.'); return; }
     if (file.size > 20 * 1024 * 1024) { setError('This image is larger than 20 MB. Choose a smaller photo and try again.'); return; }
     if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
-    const nextUrl = URL.createObjectURL(file); imageUrlRef.current = nextUrl; setImageUrl(nextUrl); setError(''); setBusy(true); setStatus('Preparing photo for scan…');
-    let worker: { recognize: (input: Blob) => Promise<{ data: { text: string } }>; terminate: () => Promise<unknown> } | undefined;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const nextUrl = URL.createObjectURL(file); imageUrlRef.current = nextUrl; setImageUrl(nextUrl); setError(''); setBusy(true);
+    let worker: { recognize: (input: Blob, options?: { logger?: (message: { status?: string; progress?: number }) => void }) => Promise<{ data: { text: string } }>; terminate: () => Promise<unknown> } | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined; let timedOut = false;
+    const timeout = new Promise<never>((_, reject) => { timeoutId = setTimeout(() => { timedOut = true; reject(new Error('OCR_TIMEOUT')); }, OCR_TIMEOUT_MS); });
     try {
-      const input = await prepareOcrImage(file);
-      const { createWorker } = await import('tesseract.js');
-      setStatus('Loading OCR engine…');
-      worker = await createWorker('eng', 1, { logger: (message: { status?: string; progress?: number }) => {
-        const pct = typeof message.progress === 'number' ? ` ${Math.round(message.progress * 100)}%` : '';
-        const stage = message.status === 'recognizing text' ? 'Scanning text' : message.status === 'loading language traineddata' ? 'Loading English language data' : message.status === 'initializing tesseract' ? 'Starting OCR engine' : 'Preparing OCR';
-        setStatus(`${stage}…${pct}`);
-      } });
-      const timeout = new Promise<never>((_, reject) => { timeoutId = setTimeout(() => reject(new Error('OCR_TIMEOUT')), OCR_TIMEOUT_MS); });
-      setStatus('Scanning text…');
-      const result = await Promise.race([worker.recognize(input), timeout]);
-      const text = result.data.text.trim();
-      if (!text) { setStatus('No readable text found. Try a closer, sharper photo.'); setError('Keep the plate flat, well lit, and in focus, then scan again.'); return; }
-      const found = extractSpecs(text); setEquipment((current) => ({ ...current, ...Object.fromEntries(Object.entries(found).filter(([, value]) => Boolean(value))) } as Equipment)); setStatus('Scan complete. Verify each field against the original plate.');
+      const process = async () => {
+        setStatus('Optimizing image (resizing & enhancing)...'); const input = await prepareOcrImage(file);
+        setStatus('Loading OCR engine...'); const { createWorker } = await import('tesseract.js');
+        const created = await createWorker('eng', 1, { logger: (message: { status?: string; progress?: number }) => {
+          if (message.status === 'recognizing text') setStatus(`Reading data plate (${typeof message.progress === 'number' ? Math.round(message.progress * 100) : 0}%)...`);
+          else if (message.status === 'loading language traineddata' || message.status === 'initializing tesseract') setStatus('Loading OCR engine...');
+        } });
+        worker = created;
+        if (timedOut) { await created.terminate().catch(() => undefined); throw new Error('OCR_TIMEOUT'); }
+        const result = await created.recognize(input); const text = result.data.text.trim();
+        if (!text) { setStatus(''); setError('No readable text found. Keep the plate flat, well lit, and in focus, then scan again or enter details manually.'); return; }
+        setStatus('Parsing specifications...'); const found = extractSpecs(text);
+        setEquipment((current) => ({ ...current, ...Object.fromEntries(Object.entries(found).filter(([, value]) => Boolean(value))) } as Equipment));
+        setStatus('Scan complete. Verify or edit each field against the original plate.');
+      };
+      await Promise.race([process(), timeout]);
     } catch (caught) {
-      if (caught instanceof Error && caught.message === 'OCR_TIMEOUT') { setStatus(''); setError('The scan is taking longer than expected, so it was stopped to keep the page responsive. Try a smaller, clearer photo or enter details manually.'); }
-      else { setStatus(''); setError(caught instanceof Error ? `The scan could not run: ${caught.message}. Check your connection and try again, or enter details manually.` : 'The scan could not run. Check your connection and try again, or enter the details manually.'); }
+      setStatus(''); setError(caught instanceof Error && caught.message === 'OCR_TIMEOUT' ? 'The scan timed out after 28 seconds. Check your connection and try a smaller photo, or enter details manually.' : `The scan could not run: ${caught instanceof Error ? caught.message : 'Unknown error'}. Check your connection and try again, or enter details manually.`);
     } finally { if (timeoutId) clearTimeout(timeoutId); if (worker) await worker.terminate().catch(() => undefined); setBusy(false); }
   }
 
-  const handlePaste = useCallback((event: ClipboardEvent | React.ClipboardEvent<HTMLElement>) => {
-    const items = event.clipboardData?.items;
-    if (!items) return;
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (item.type.indexOf('image') !== -1) {
-        const file = item.getAsFile();
-        if (file) { event.preventDefault(); void scan(file); return; }
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    const listener = (event: ClipboardEvent) => handlePaste(event);
-    window.addEventListener('paste', listener);
-    return () => window.removeEventListener('paste', listener);
-  }, [handlePaste]);
-
-  async function pasteFromClipboard() {
-    if (!navigator.clipboard?.read) { setError('Clipboard image access is not available here. Use the paste shortcut or choose a photo.'); return; }
-    try {
-      const clipboardItems = await navigator.clipboard.read();
-      for (const item of clipboardItems) {
-        const imageType = item.types.find((type) => type.startsWith('image/'));
-        if (imageType) { const blob = await item.getType(imageType); await scan(new File([blob], 'clipboard-image', { type: blob.type || imageType })); return; }
-      }
-      setError('No image found in the clipboard. Copy a photo first, then try again.');
-    } catch { setError('Clipboard access was denied or unavailable. Try pasting directly into the page, or choose a photo.'); }
-  }
-
-  function reset() {
-    setEquipment(EMPTY_EQUIPMENT); if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current); imageUrlRef.current = ''; setImageUrl(''); setStatus(''); setError(''); if (fileInput.current) fileInput.current.value = '';
-  }
+  function reset() { setEquipment(EMPTY_EQUIPMENT); if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current); imageUrlRef.current = ''; setImageUrl(''); setStatus(''); setError(''); if (fileInput.current) fileInput.current.value = ''; }
 
   return (
-    <main className="app-shell" onPaste={handlePaste}>
+    <main className="app-shell">
       <header className="topbar"><a className="wordmark" href="#top" aria-label="AndiScan home"><span className="mark">A</span><span>ANDI<span className="wordmark-light">SCAN</span></span></a><div className="top-meta"><span className="live-dot" /> FIELD INTELLIGENCE <span className="top-divider">/</span> HVAC</div></header>
       <section className="hero" id="top"><div className="hero-copy"><div className="eyebrow"><span>01</span> EQUIPMENT, DECODED</div><h1>Every detail.<br /><em>In focus.</em></h1><p>Turn a rating plate into a clear equipment record. Scan the unit, verify its specs, and make your next replacement conversation more informed.</p></div><div className="hero-aside"><span className="aside-line" /><span>BUILT FOR THE<br />FIELD, BY DESIGN</span><span className="aside-index">A / 001</span></div></section>
       <section className="workflow" aria-label="Equipment scan workflow"><div className="workflow-step active"><span>01</span> CAPTURE</div><span className="step-rule" /><div className="workflow-step"><span>02</span> VERIFY SPECS</div><span className="step-rule" /><div className="workflow-step"><span>03</span> PLAN REPLACEMENT</div></section>
       <div className="main-grid">
-        <section className="panel capture-panel" aria-labelledby="capture-heading">
-          <div className="panel-head"><div><div className="section-kicker">STEP 01 <span>—</span> THE SOURCE</div><h2 id="capture-heading">Capture the nameplate</h2></div><span className="panel-number">01</span></div>
+        <section className="panel capture-panel" aria-labelledby="capture-heading"><div className="panel-head"><div><div className="section-kicker">STEP 01 <span>—</span> THE SOURCE</div><h2 id="capture-heading">Capture the nameplate</h2></div><span className="panel-number">01</span></div>
           <p className="panel-intro">Upload a photo or capture one with your camera. Text recognition runs in your browser.</p>
           <input ref={fileInput} className="file-input" type="file" accept="image/*" onChange={(event) => void scan(event.currentTarget.files?.[0])} aria-label="Choose nameplate image from photos or files" />
-          <button className="upload-zone" type="button" onClick={() => fileInput.current?.click()} aria-label="Choose a nameplate image" disabled={busy}>
-            {imageUrl ? <img className="plate-image" src={imageUrl} alt="Equipment rating plate preview" /> : <><span className="upload-icon">↗</span><span className="upload-title">Drop your plate photo here</span><span className="upload-subtitle">or tap to browse photos, files, or camera</span><span className="upload-format">JPG · PNG · HEIC</span></>}
-          </button>
-          <div className="button-row"><button className="button button-accent" type="button" onClick={() => fileInput.current?.click()} disabled={busy}>{busy ? 'Scanning…' : imageUrl ? 'Choose another photo' : 'Choose from Photos / Upload'}<span>↗</span></button><button className="button button-quiet" type="button" onClick={() => void pasteFromClipboard()} disabled={busy}>Paste from Clipboard</button><button className="button button-quiet" type="button" onClick={reset}>Reset</button></div>
-          <p className="panel-intro">Tip: Copy a photo from Messages, then use your device’s Paste command anywhere on this page, or tap Paste from Clipboard above. Clipboard access may require permission.</p>
+          <button className="upload-zone" type="button" onClick={() => fileInput.current?.click()} aria-label="Choose a nameplate image" disabled={busy}>{imageUrl ? <img className="plate-image" src={imageUrl} alt="Equipment rating plate preview" /> : <><span className="upload-icon">↗</span><span className="upload-title">Drop your plate photo here</span><span className="upload-subtitle">or tap to browse photos, files, or camera</span><span className="upload-format">JPG · PNG · HEIC</span></>}</button>
+          <div className="button-row"><button className="button button-accent" type="button" onClick={() => fileInput.current?.click()} disabled={busy}>{busy ? 'Scanning…' : imageUrl ? 'Choose another photo' : 'Choose from Photos / Upload'}<span>↗</span></button><button className="button button-quiet" type="button" onClick={reset}>Reset</button></div>
           {status && <p className="scan-status" role="status" aria-live="polite">{busy && <span className="spinner" />}{status}</p>}{error && <p className="scan-error" role="alert">{error}</p>}
           <div className="privacy-note"><span>◈</span> YOUR PHOTO STAYS IN THIS SESSION. SCANNING IS DONE IN YOUR BROWSER.</div>
         </section>
-        <section className="panel specs-panel" aria-labelledby="specs-heading"><div className="panel-head"><div><div className="section-kicker">STEP 02 <span>—</span> THE RECORD</div><h2 id="specs-heading">Equipment details</h2></div><span className="panel-number">02</span></div><p className="panel-intro">OCR is a starting point. Review the plate and correct anything that doesn’t look right.</p><div className="spec-fields">{FIELDS.map(({ key, label, hint }) => <label className={'spec-field' + (key === 'electrical' ? ' field-wide' : '')} key={key}><span>{label}</span><input value={equipment[key]} placeholder={hint} onChange={(event) => setEquipment((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div><div className="verify-note"><span className="check-mark">✓</span><span><strong>Human verified.</strong> Always confirm extracted data against the original plate before using it for a quote.</span></div></section>
+        <section className="panel specs-panel" aria-labelledby="specs-heading"><div className="panel-head"><div><div className="section-kicker">STEP 02 <span>—</span> THE RECORD</div><h2 id="specs-heading">Equipment details</h2></div><span className="panel-number">02</span></div><p className="panel-intro">Edit or enter values manually, or correct anything OCR extracted.</p><div className="spec-fields">{FIELDS.map(({ key, label, hint }) => <label className={'spec-field' + (key === 'electrical' ? ' field-wide' : '')} key={key}><span>{label}</span><input value={equipment[key]} placeholder={hint} onChange={(event) => setEquipment((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div><div className="verify-note"><span className="check-mark">✓</span><span><strong>Human verified.</strong> Always confirm extracted data against the original plate before using it for a quote.</span></div></section>
       </div>
       <section className="replacement-section"><div className="replacement-heading"><div><div className="section-kicker">STEP 03 <span>—</span> THE NEXT MOVE</div><h2>Replacement notes</h2></div><span className="notes-label">A FIELD GUIDE, NOT A FINAL SPEC</span></div><div className="notes-grid">{REPLACEMENT_NOTES.map((note, index) => <article className="note-card" key={note.title}><div className="note-index">0{index + 1}</div><h3>{note.title}</h3><p>{note.text}</p></article>)}</div><p className="disclaimer">AndiScan helps organize plate information. It does not determine compatibility, provide live inventory, or guarantee incentive eligibility. Confirm sizing, certified system matches, code, and current program rules with the responsible HVAC professional.</p></section>
       <footer className="footer"><span>ANDISCAN <span className="footer-muted">· EQUIPMENT INTELLIGENCE</span></span><span>READ THE PLATE. KNOW THE UNIT.</span></footer>
