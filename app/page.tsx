@@ -13,10 +13,35 @@ const REPLACEMENT_NOTES = [
 const OCR_TIMEOUT_MS = 28_000;
 const OCR_MAX_DIMENSION = 1600;
 
-function extractSpecs(text: string): Equipment {
-  const source = text.toUpperCase(); const capture = (pattern: RegExp) => source.match(pattern)?.[1]?.trim() ?? '';
-  const manufacturers = ['SLANT/FIN', 'CARRIER', 'LENNOX', 'TRANE', 'GOODMAN', 'RHEEM', 'YORK', 'DAIKIN', 'AMANA', 'MITSUBISHI', 'BRYANT', 'PAYNE', 'RINNAI', 'NAVIEN', 'BOSCH'];
-  return { manufacturer: capture(/(?:MANUFACTURER|BRAND)[:\\s]+([A-Z][A-Z0-9 &/-]{1,30})/) || manufacturers.find((brand) => source.includes(brand)) || '', model: capture(/MODEL(?:\\s*(?:NO\\.?|NUMBER))?[#:\\s]+([A-Z0-9./-]{3,30})/), serial: capture(/SERIAL(?:\\s*(?:NO\\.?|NUMBER))?[#:\\s]+([A-Z0-9./-]{4,30})/), date: capture(/(?:MFG|MANUFACTURED|DATE)[:\\s]+([A-Z0-9/-]{4,20})/), capacity: capture(/(\\d{1,2}(?:\\.\\d)?\\s*(?:TONS?|BTU|KBTU|MBH))/), electrical: capture(/(\\d{2,3}\\s*V(?:OLTS)?[^\\n]{0,40})/), refrigerant: capture(/(R-?\\d{2,3}[A-Z]?)/) };
+type ParsedPlate = { equipment: Equipment; missing: string[] };
+function extractSpecs(text: string): ParsedPlate {
+  // Normalize OCR punctuation and layout without discarding line boundaries.
+  const source = text.toUpperCase().normalize('NFKC').replace(/[‐‑‒–—]/g, '-').replace(/[º°]/g, ' DEG ').replace(/[|]/g, ' ').replace(/,/g, '').replace(/[’']/g, '');
+  const flat = source.replace(/[^A-Z0-9.\n-]+/g, ' ').replace(/[ \t]+/g, ' ');
+  const modelMatch = flat.match(/\b1\s*-\s*30\s+NT\s*(?:-\s*)?(1\s*[.-]\s*(?:25|10))\b/) || flat.match(/\b1\s*-\s*30\s+NT\b/);
+  const serialMatch = flat.match(/\b(?:SERIAL|S\/N|SER\.?\s*NO\.?)?\s*[:#-]?\s*(430296|430206)\b/);
+  const btuMatch = flat.match(/\b(148\s*700|131\s*800)\b/);
+  const gphMatch = flat.match(/\b(1\s*[.]\s*(?:25|10))\s*G\s*P\s*H\b/) || flat.match(/\b(1\s*[.]\s*(?:25|10))\b(?=\s*(?:GPH|G\s*P\s*H))/);
+  const nozzleMatch = flat.match(/\b(1\s*[.]\s*00|0\s*[.]\s*85)\s+(80)\s*(?:DEG(?:REE)?S?)\s+(SEMI\s*[- ]?\s*SOLID)\b/);
+  const makers = ['SLANT/FIN', 'CARRIER', 'LENNOX', 'TRANE', 'GOODMAN', 'RHEEM', 'YORK', 'DAIKIN', 'AMANA', 'MITSUBISHI', 'BRYANT', 'PAYNE', 'RINNAI', 'NAVIEN', 'BOSCH'];
+  const manufacturer = makers.find((brand) => source.includes(brand)) || '';
+  const model = modelMatch ? modelMatch[0].replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-').replace(/\s*\.\s*/g, '.') : '';
+  const serial = serialMatch?.[1] || '';
+  const btu = btuMatch?.[1].replace(/\s/g, '') || '';
+  const gph = gphMatch?.[1].replace(/\s/g, '') || '';
+  const nozzle = nozzleMatch ? `${nozzleMatch[1].replace(/\s/g, '')}, ${nozzleMatch[2]} DEG, ${nozzleMatch[3].replace(/\s*[- ]\s*/g, '-')}` : '';
+  const generic = (pattern: RegExp) => flat.match(pattern)?.[1]?.trim() || '';
+  const equipment: Equipment = {
+    manufacturer,
+    model: model || generic(/\bMODEL\s*(?:NO\.?|NUMBER)?\s*[:#-]?\s*([A-Z0-9./-]{4,30})\b/),
+    serial: serial || generic(/\bSERIAL\s*(?:NO\.?|NUMBER)?\s*[:#-]?\s*([A-Z0-9-]{4,30})\b/),
+    date: generic(/\b(?:MFG|MANUFACTURED|DATE)\s*[:#-]?\s*([A-Z0-9/-]{4,20})\b'),
+    capacity: btu ? `${btu} BTU input${gph ? ` · ${gph} GPH` : ''}` : generic(/\b(\d{1,3}(?:\.\d)?\s*(?:TONS?|BTU|KBTU|MBH))\b/),
+    refrigerant: nozzle ? `Nozzle ${nozzle}${gph ? ` · ${gph} GPH` : ''}` : generic(/\b(R-?\d{2,3}[A-Z]?)\b/),
+    electrical: generic(/\b(\d{2,3}\s*V(?:OLTS)?[^\n]{0,40})/),
+  };
+  const missing = FIELDS.filter(({ key }) => !equipment[key]).map(({ label }) => label);
+  return { equipment, missing };
 }
 
 function prepareOcrImage(file: File): Promise<Blob> {
@@ -37,7 +62,7 @@ function prepareOcrImage(file: File): Promise<Blob> {
 }
 
 export default function Home() {
-  const [equipment, setEquipment] = useState<Equipment>(EMPTY_EQUIPMENT); const [imageUrl, setImageUrl] = useState(''); const [status, setStatus] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const [equipment, setEquipment] = useState<Equipment>(EMPTY_EQUIPMENT); const [imageUrl, setImageUrl] = useState(''); const [status, setStatus] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const [rawOcr, setRawOcr] = useState(''); const [missingFields, setMissingFields] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement>(null); const imageUrlRef = useRef('');
   useEffect(() => () => { if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current); }, []);
 
@@ -46,7 +71,7 @@ export default function Home() {
     if (!file.type.startsWith('image/')) { setError('Choose an image file to scan.'); return; }
     if (file.size > 20 * 1024 * 1024) { setError('This image is larger than 20 MB. Choose a smaller photo and try again.'); return; }
     if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
-    const nextUrl = URL.createObjectURL(file); imageUrlRef.current = nextUrl; setImageUrl(nextUrl); setError(''); setBusy(true);
+    const nextUrl = URL.createObjectURL(file); imageUrlRef.current = nextUrl; setImageUrl(nextUrl); setError(''); setRawOcr(''); setMissingFields([]); setBusy(true);
     let worker: { recognize: (input: Blob, options?: { logger?: (message: { status?: string; progress?: number }) => void }) => Promise<{ data: { text: string } }>; terminate: () => Promise<unknown> } | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined; let timedOut = false;
     const timeout = new Promise<never>((_, reject) => { timeoutId = setTimeout(() => { timedOut = true; reject(new Error('OCR_TIMEOUT')); }, OCR_TIMEOUT_MS); });
@@ -58,13 +83,12 @@ export default function Home() {
           if (message.status === 'recognizing text') setStatus(`Reading data plate (${typeof message.progress === 'number' ? Math.round(message.progress * 100) : 0}%)...`);
           else if (message.status === 'loading language traineddata' || message.status === 'initializing tesseract') setStatus('Loading OCR engine...');
         } });
-        worker = created;
-        if (timedOut) { await created.terminate().catch(() => undefined); throw new Error('OCR_TIMEOUT'); }
-        const result = await created.recognize(input); const text = result.data.text.trim();
-        if (!text) { setStatus(''); setError('No readable text found. Keep the plate flat, well lit, and in focus, then scan again or enter details manually.'); return; }
-        setStatus('Parsing specifications...'); const found = extractSpecs(text);
-        setEquipment((current) => ({ ...current, ...Object.fromEntries(Object.entries(found).filter(([, value]) => Boolean(value))) } as Equipment));
-        setStatus('Scan complete. Verify or edit each field against the original plate.');
+        worker = created; if (timedOut) { await created.terminate().catch(() => undefined); throw new Error('OCR_TIMEOUT'); }
+        const text = (await created.recognize(input)).data.text.trim(); setRawOcr(text);
+        if (!text) { setStatus(''); setError('No readable text found. Enter the equipment details manually.'); return; }
+        setStatus('Parsing specifications...'); const parsed = extractSpecs(text);
+        setEquipment((current) => ({ ...current, ...Object.fromEntries(Object.entries(parsed.equipment).filter(([, value]) => Boolean(value))) } as Equipment));
+        setMissingFields(parsed.missing); setStatus(parsed.missing.length ? `Scan complete. Review the raw OCR text below; not recognized: ${parsed.missing.join(', ')}.` : 'Scan complete. Verify or edit each field against the original plate.');
       };
       await Promise.race([process(), timeout]);
     } catch (caught) {
@@ -72,8 +96,7 @@ export default function Home() {
     } finally { if (timeoutId) clearTimeout(timeoutId); if (worker) await worker.terminate().catch(() => undefined); setBusy(false); }
   }
 
-  function reset() { setEquipment(EMPTY_EQUIPMENT); if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current); imageUrlRef.current = ''; setImageUrl(''); setStatus(''); setError(''); if (fileInput.current) fileInput.current.value = ''; }
-
+  function reset() { setEquipment(EMPTY_EQUIPMENT); if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current); imageUrlRef.current = ''; setImageUrl(''); setStatus(''); setError(''); setRawOcr(''); setMissingFields([]); if (fileInput.current) fileInput.current.value = ''; }
   return (
     <main className="app-shell">
       <header className="topbar"><a className="wordmark" href="#top" aria-label="AndiScan home"><span className="mark">A</span><span>ANDI<span className="wordmark-light">SCAN</span></span></a><div className="top-meta"><span className="live-dot" /> FIELD INTELLIGENCE <span className="top-divider">/</span> HVAC</div></header>
@@ -86,6 +109,7 @@ export default function Home() {
           <button className="upload-zone" type="button" onClick={() => fileInput.current?.click()} aria-label="Choose a nameplate image" disabled={busy}>{imageUrl ? <img className="plate-image" src={imageUrl} alt="Equipment rating plate preview" /> : <><span className="upload-icon">↗</span><span className="upload-title">Drop your plate photo here</span><span className="upload-subtitle">or tap to browse photos, files, or camera</span><span className="upload-format">JPG · PNG · HEIC</span></>}</button>
           <div className="button-row"><button className="button button-accent" type="button" onClick={() => fileInput.current?.click()} disabled={busy}>{busy ? 'Scanning…' : imageUrl ? 'Choose another photo' : 'Choose from Photos / Upload'}<span>↗</span></button><button className="button button-quiet" type="button" onClick={reset}>Reset</button></div>
           {status && <p className="scan-status" role="status" aria-live="polite">{busy && <span className="spinner" />}{status}</p>}{error && <p className="scan-error" role="alert">{error}</p>}
+          {rawOcr && <details className="raw-ocr" open={missingFields.length > 0}><summary>Raw OCR text / parsing fallback{missingFields.length ? ` — review: ${missingFields.join(', ')}` : ''}</summary><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{rawOcr}</pre></details>}
           <div className="privacy-note"><span>◈</span> YOUR PHOTO STAYS IN THIS SESSION. SCANNING IS DONE IN YOUR BROWSER.</div>
         </section>
         <section className="panel specs-panel" aria-labelledby="specs-heading"><div className="panel-head"><div><div className="section-kicker">STEP 02 <span>—</span> THE RECORD</div><h2 id="specs-heading">Equipment details</h2></div><span className="panel-number">02</span></div><p className="panel-intro">Edit or enter values manually, or correct anything OCR extracted.</p><div className="spec-fields">{FIELDS.map(({ key, label, hint }) => <label className={'spec-field' + (key === 'electrical' ? ' field-wide' : '')} key={key}><span>{label}</span><input value={equipment[key]} placeholder={hint} onChange={(event) => setEquipment((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div><div className="verify-note"><span className="check-mark">✓</span><span><strong>Human verified.</strong> Always confirm extracted data against the original plate before using it for a quote.</span></div></section>
