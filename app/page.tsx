@@ -11,7 +11,7 @@ const REPLACEMENT_NOTES = [
   { title: 'Capacity first', text: 'Confirm the existing load and match nominal capacity to a Manual J calculation—not tonnage alone.' }, { title: 'Verify the system', text: 'Check indoor and outdoor unit pairing, AHRI certification, electrical requirements, and refrigerant line compatibility.' }, { title: 'Local requirements', text: 'Review current efficiency incentives, local code, and manufacturer documentation before quoting.' },
 ];
 const OCR_TIMEOUT_MS = 28_000;
-const OCR_MAX_DIMENSION = 1600;
+const OCR_MAX_DIMENSION = 2400;
 
 type ParsedPlate = { equipment: Equipment; missing: string[] };
 function extractSpecs(text: string): ParsedPlate {
@@ -49,12 +49,19 @@ function prepareOcrImage(file: File): Promise<Blob> {
     const sourceUrl = URL.createObjectURL(file); const image = new Image();
     image.onload = () => {
       try {
+        // Keep original resolution up to 2400px; never enlarge smaller originals.
         const scale = Math.min(1, OCR_MAX_DIMENSION / Math.max(image.naturalWidth, image.naturalHeight));
         const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
         const context = canvas.getContext('2d', { willReadFrequently: true }); if (!context) throw new Error('Canvas is unavailable');
-        context.drawImage(image, 0, 0, canvas.width, canvas.height); const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-        for (let i = 0; i < pixels.data.length; i += 4) { const gray = Math.min(255, Math.max(0, ((pixels.data[i] * 0.299 + pixels.data[i + 1] * 0.587 + pixels.data[i + 2] * 0.114) - 128) * 1.15 + 128)); pixels.data[i] = gray; pixels.data[i + 1] = gray; pixels.data[i + 2] = gray; }
-        context.putImageData(pixels, 0, 0); canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Could not prepare image for scanning')), 'image/jpeg', 0.88);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        // Mild grayscale only: avoid harsh contrast changes that clip stamped text and metallic highlights.
+        for (let i = 0; i < pixels.data.length; i += 4) {
+          const gray = pixels.data[i] * 0.299 + pixels.data[i + 1] * 0.587 + pixels.data[i + 2] * 0.114;
+          pixels.data[i] = gray; pixels.data[i + 1] = gray; pixels.data[i + 2] = gray;
+        }
+        context.putImageData(pixels, 0, 0);
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Could not prepare image for scanning')), 'image/jpeg', 0.96);
       } catch (error) { reject(error); } finally { URL.revokeObjectURL(sourceUrl); }
     };
     image.onerror = () => { URL.revokeObjectURL(sourceUrl); reject(new Error('This photo format could not be opened. Try a JPG or PNG photo.')); }; image.src = sourceUrl;
@@ -72,7 +79,7 @@ export default function Home() {
     if (file.size > 20 * 1024 * 1024) { setError('This image is larger than 20 MB. Choose a smaller photo and try again.'); return; }
     if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
     const nextUrl = URL.createObjectURL(file); imageUrlRef.current = nextUrl; setImageUrl(nextUrl); setError(''); setRawOcr(''); setMissingFields([]); setBusy(true);
-    let worker: { recognize: (input: Blob, options?: { logger?: (message: { status?: string; progress?: number }) => void }) => Promise<{ data: { text: string } }>; terminate: () => Promise<unknown> } | undefined;
+    let worker: { recognize: (input: Blob, options?: { logger?: (message: { status?: string; progress?: number }) => void }) => Promise<{ data: { text: string } }>; setParameters: (params: Record<string, string>) => Promise<unknown>; terminate: () => Promise<unknown> } | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined; let timedOut = false;
     const timeout = new Promise<never>((_, reject) => { timeoutId = setTimeout(() => { timedOut = true; reject(new Error('OCR_TIMEOUT')); }, OCR_TIMEOUT_MS); });
     try {
@@ -84,6 +91,8 @@ export default function Home() {
           else if (message.status === 'loading language traineddata' || message.status === 'initializing tesseract') setStatus('Loading OCR engine...');
         } });
         worker = created; if (timedOut) { await created.terminate().catch(() => undefined); throw new Error('OCR_TIMEOUT'); }
+        // PSM 11 handles sparse, multi-column plate text. No whitelist: retain digits and punctuation.
+        await created.setParameters({ tessedit_pageseg_mode: '11' });
         const text = (await created.recognize(input)).data.text.trim(); setRawOcr(text);
         if (!text) { setStatus(''); setError('No readable text found. Enter the equipment details manually.'); return; }
         setStatus('Parsing specifications...'); const parsed = extractSpecs(text);
